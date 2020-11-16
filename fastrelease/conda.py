@@ -63,7 +63,7 @@ def write_pip_conda_meta(name, path='conda'):
     _write_yaml(path, name, *_pip_conda_meta(name))
 
 # Cell
-def _get_conda_meta():
+def _get_conda_meta(offline=False):
     cfg,cfg_path = find_config()
     name,ver = cfg.get('lib_name'),cfg.get('version')
     url = cfg.get('doc_host') or cfg.get('git_url')
@@ -72,13 +72,27 @@ def _get_conda_meta():
     if cfg.get('requirements'): reqs += cfg.get('requirements').split()
     if cfg.get('conda_requirements'): reqs += cfg.get('conda_requirements').split()
 
-    pypi = pypi_json(f'{name}/{ver}')
-    rel = [o for o in pypi['urls'] if o['packagetype']=='sdist'][0]
+    if not offline:
+        pypi = pypi_json(f'{name}/{ver}')
+        rel = [o for o in pypi['urls'] if o['packagetype']=='sdist'][0]
+        source = {'url':rel['url'], 'sha256':rel['digests']['sha256']}
+    else:
+        # Recipe will be put in subfolder `conda/<name-of-package>`
+        path_to_root = '../..'
+        if cfg.get('conda_from', 'source') == 'source':
+            # Build from source (copy of working folder) using setup.py
+            source =  {'path': path_to_root}
+        elif cfg.get('conda_from') == 'git':
+            source =  {'git_url': cfg.get('conda_git_url', path_to_root),
+                       'git_rev': cfg.get('conda_git_rev', 'HEAD')}
+        else:
+            raise ValueError("Using offline mode without specifying package source, "
+                             "update `settings.ini` to include `conda_from=[source|git]`")
 
     # Work around conda build bug - 'package' and 'source' must be first
     d1 = {
         'package': {'name': name, 'version': ver},
-        'source': {'url':rel['url'], 'sha256':rel['digests']['sha256']}
+        'source': source
     }
 
     d2 = {
@@ -97,9 +111,9 @@ def _get_conda_meta():
     return name,d1,d2
 
 # Cell
-def write_conda_meta(path='conda'):
+def write_conda_meta(path='conda', offline=False):
     "Writes a `meta.yaml` file to the `conda` directory of the current directory"
-    _write_yaml(path, *_get_conda_meta())
+    _write_yaml(path, *_get_conda_meta(offline=offline))
 
 # Cell
 @call_parse
@@ -107,11 +121,15 @@ def fastrelease_conda_package(path:Param("Path where package will be created", s
                               do_build:Param("Run `conda build` step", bool_arg)=True,
                               build_args:Param("Additional args (as str) to send to `conda build`", str)='',
                               do_upload:Param("Run `anaconda upload` step", bool_arg)=True,
-                              upload_user:Param("Optional user to upload package to")=None):
+                              upload_user:Param("Optional user to upload package to")=None,
+                              offline:Param("Build package offline", store_true)=False):
     "Create a `meta.yaml` file ready to be built into a package, and optionally build and upload it"
-    write_conda_meta(path)
+    if offline:
+        do_upload = False
+        print("Offline mode, disabling upload.")
+    write_conda_meta(path, offline=offline)
     cfg,cfg_path = find_config()
-    out = f"Done. Next steps:\n```\`cd {path}\n"""
+    out = f"Done. Next steps:\n```\ncd {path}\n"""
     name,lib_path = cfg.get('lib_name'),cfg.get('lib_path')
     out_upl = f"anaconda upload build/noarch/{lib_path}-{cfg.get('version')}-py_0.tar.bz2"
     if not do_build:
