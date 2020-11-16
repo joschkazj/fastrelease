@@ -27,7 +27,7 @@ def latest_pypi(name):
 
 # Cell
 def _pip_conda_meta(name, path):
-    ver = str(latest_pypi('sentencepiece'))
+    ver = str(latest_pypi(name))
     pypi = pypi_json(f'{name}/{ver}')
     info = pypi['info']
     rel = [o for o in pypi['urls'] if o['packagetype']=='sdist'][0]
